@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WIMS Map - Updated Full Code</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-draw/dist/leaflet.draw.css"/>
+  <style>
+    body { margin: 0; display: flex; }
+    #map {
+      height: 100vh;
+      width: calc(100% - 600px);
+      z-index: 9999;
+      position: relative;
+    }
+    #panel, #rightPanel {
+      width: 300px;
+      background: #ffffffcc;
+      padding: 15px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+      font-family: Arial, sans-serif;
+      overflow-y: auto;
+    }
+    button, select {
+      width: 100%; padding: 10px; margin-bottom: 10px;
+      border-radius: 10px; font-size: 14px;
+    }
+    button {
+      background: #f0f0f0;
+      border: 2px solid #004080;
+      color: #004080;
+      font-weight: bold;
+      box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+    }
+    button:hover { background: #e0e0e0; }
+    .label-toggle { margin-bottom: 10px; display: flex; align-items: center; }
+    .label-toggle input { margin-right: 5px; }
+    .label {
+      background-color: transparent !important;
+      color: #ffffff !important;
+      font-size: 13px !important;
+      padding: 2px 5px !important;
+      font-weight: normal !important;
+      border: none !important;
+      box-shadow: none !important;
+      border-radius: 0 !important;
+      white-space: nowrap !important;
+    }
+  </style>
+</head>
+<body>
+
+<div id="panel">
+  <h3>Location Info (Left Panel)</h3>
+  <button id="stateBtn">Place:</button>
+  <button id="districtBtn">-</button>
+  <button id="subdistrictBtn"></button>
+  <button id="villageBtn"></button>
+  <button id="latlngBtn">Lat: - , Lng: -</button>
+  <button id="submitLeftBtn">✔ Submit</button>
+  <button id="locateMeBtn">📍 Locate Me</button>
+  <button id="resetLeftBtn">🔄 Reset</button>
+</div>
+
+<div id="map"></div>
+
+<div id="rightPanel">
+  <div class="label-toggle">
+    <input type="checkbox" id="labelToggle" checked>
+    <label for="labelToggle">Show Labels</label>
+  </div>
+  <h3>Jump to Location (Right Panel)</h3>
+  <select id="stateSelect"><option>Select State</option></select>
+  <select id="districtSelect"><option>Select District</option></select>
+  <select id="subdistrictSelect"><option>Select Subdistrict</option></select>
+  <select id="villageSelect"><option>Select Village</option></select>
+  <button id="submitRightBtn">✔ Submit</button>
+  <button id="rightLatLngBtn">Lat: - , Lng: -</button>
+  <button id="resetRightBtn">🔄 Reset</button>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-draw/dist/leaflet.draw.js"></script>
+<script src="https://unpkg.com/esri-leaflet"></script>
+<script>
+const map = L.map('map').setView([23.5, 80], 5);
+L.esri.basemapLayer('Imagery').addTo(map);
+L.esri.basemapLayer('ImageryLabels').addTo(map);
+
+const drawnItems = new L.FeatureGroup().addTo(map);
+new L.Control.Draw({
+  draw: { polygon: true, marker: true, polyline: false, circle: false, rectangle: false },
+  edit: { featureGroup: drawnItems }
+}).addTo(map);
+
+map.on('draw:created', function (e) {
+  drawnItems.clearLayers();
+  drawnItems.addLayer(e.layer);
+  const type = e.layerType;
+  const latlng = (type === 'marker') ? e.layer.getLatLng() : e.layer.getBounds().getCenter();
+  if (activePanel === 'left') {
+  updateLeftPanel(latlng);
+  } else {
+    updateRightPanel(latlng);
+  }
+});
+
+let visuals = { district: null, subdistrict: null, village: null };
+let labels = [];
+let leftMarker = null;
+let rightMarker = null;
+let activePanel = null;
+
+function toDMS(deg) {
+  const d = Math.floor(deg);
+  const minfloat = (deg - d) * 60;
+  const m = Math.floor(minfloat);
+  const secfloat = (minfloat - m) * 60;
+  const s = Math.round(secfloat);
+  return `${d}° ${m}' ${s}"`;
+}
+
+function clearLayers(keys) {
+  keys.forEach(key => {
+    if (visuals[key]) {
+      map.removeLayer(visuals[key]);
+      visuals[key] = null;
+    }
+  });
+  labels.forEach(label => map.removeLayer(label));
+  labels = [];
+}
+
+function setDropdownValue(id, value) {
+  const sel = document.getElementById(id);
+  for (let i = 0; i < sel.options.length; i++) {
+    if (sel.options[i].text === value) {
+      sel.selectedIndex = i;
+      break;
+    }
+  }
+}
+
+function addLabelToMap(bounds, text) {
+  const center = bounds.getCenter();
+  const offsetLat = (bounds.getNorth() - bounds.getSouth()) * 0.08;
+  const label = L.marker([center.lat + offsetLat, center.lng], {
+    icon: L.divIcon({ className: '', html: `<div class='label'>${text}</div>` }),
+    interactive: false
+  });
+  labels.push(label);
+  if (document.getElementById('labelToggle').checked) label.addTo(map);
+}
+
+const layersConfig = {
+  state: { url: 'https://arc.indiawris.gov.in/server/rest/services/Common/Administrative_WRP/FeatureServer/3', color: 'red', field: 'state' },
+  district: { url: 'https://arc.indiawris.gov.in/server/rest/services/Common/Administrative_WRP/FeatureServer/4', color: 'blue', field: 'district' },
+  subdistrict: { url: 'https://arc.indiawris.gov.in/server/rest/services/Common/Administrative_WRP/FeatureServer/5', color: 'purple', field: 'subdistrict' },
+  village: { url: 'https://arc.indiawris.gov.in/server/rest/services/Common/Administrative_WRP/FeatureServer/6', color: 'orange', field: 'village' }
+};
+loadLayer(layersConfig.state, "1=1", "stateSelect", "state");
+function loadLayer(config, whereClause, selectId, visualKey) {
+  L.esri.query({ url: config.url }).where(whereClause).limit(1000).run(function(err, fc) {
+    if (err) return console.error(err);
+    const sel = document.getElementById(selectId);
+    sel.innerHTML = `<option>Select ${visualKey}</option>`;
+    fc.features.forEach(f => {
+      const name = f.properties[config.field];
+      const center = L.geoJSON(f.geometry).getBounds().getCenter();
+      sel.add(new Option(name, JSON.stringify({ name: name, coords: [center.lat, center.lng] })));
+    });
+
+    visuals[visualKey] = L.geoJSON(fc, {
+      style: { color: config.color, weight: 2, fillOpacity: 0 },
+      onEachFeature: function (feature, layer) {
+        layer.on('click', function(e) {
+          if (activePanel === 'right') {
+            const p = feature.properties;
+            if (p.state) setDropdownValue('stateSelect', p.state);
+            if (p.district) setDropdownValue('districtSelect', p.district);
+            if (p.subdistrict) setDropdownValue('subdistrictSelect', p.subdistrict);
+            if (p.village) setDropdownValue('villageSelect', p.village);
+            const latlng = e.latlng;
+            if (rightMarker) {
+              rightMarker.setLatLng(latlng);
+            } else {
+              rightMarker = new L.Marker(latlng, { draggable: true }).addTo(map);
+              rightMarker.on('dragend', function (e) {
+                const newLatLng = e.target.getLatLng();
+                document.getElementById('rightLatLngBtn').innerText = `Lat: ${newLatLng.lat.toFixed(5)} , Lng: ${newLatLng.lng.toFixed(5)}`;
+              });
+            }
+            document.getElementById('rightLatLngBtn').innerText = `Lat: ${latlng.lat.toFixed(5)} , Lng: ${latlng.lng.toFixed(5)}`;
+          }
+        });
+        addLabelToMap(layer.getBounds(), feature.properties[config.field]);
+      }
+    }).addTo(map);
+  });
+}
+
+function updateLeftPanel(latlng) {
+  document.getElementById('latlngBtn').innerText = `Lat: ${latlng.lat.toFixed(5)} , Lng: ${latlng.lng.toFixed(5)}`;
+  fetch(`https://nominatim.openstreetmap.org/reverse?lat=${latlng.lat}&lon=${latlng.lng}&format=json`, {
+    headers: { 'User-Agent': 'WIMSMap/1.0 (your-email@example.com)' }
+  })
+  .then(res => res.json())
+  .then(data => {
+    document.getElementById('stateBtn').innerText = 'Place:';
+    document.getElementById('districtBtn').innerText = data.display_name || 'No place found';
+    document.getElementById('subdistrictBtn').innerText = '';
+    document.getElementById('villageBtn').innerText = '';
+  })
+  .catch(err => {
+    document.getElementById('districtBtn').innerText = 'Error fetching place';
+    console.error(err);
+  });
+}
+
+// REMAINING EVENT LISTENERS (unchanged structure)
+document.getElementById('stateSelect').addEventListener('change', function() {
+  activePanel = 'right';
+  const data = JSON.parse(this.value);
+  map.setView(data.coords, 7);
+  clearLayers(['district', 'subdistrict', 'village']);
+  loadLayer(layersConfig.district, `state='${data.name}'`, 'districtSelect', 'district');
+});
+
+document.getElementById('districtSelect').addEventListener('change', function() {
+  const data = JSON.parse(this.value);
+  map.setView(data.coords, 9);
+  clearLayers(['subdistrict', 'village']);
+  loadLayer(layersConfig.subdistrict, `district='${data.name}'`, 'subdistrictSelect', 'subdistrict');
+});
+
+document.getElementById('subdistrictSelect').addEventListener('change', function() {
+  const data = JSON.parse(this.value);
+  map.setView(data.coords, 12);
+  clearLayers(['village']);
+  loadLayer(layersConfig.village, `subdistrict='${data.name}'`, 'villageSelect', 'village');
+});
+
+document.getElementById('villageSelect').addEventListener('change', function() {
+  const data = JSON.parse(this.value);
+  map.setView(data.coords, 14);
+});
+
+document.getElementById('submitLeftBtn').addEventListener('click', function () {
+  if (leftMarker) {
+    const latlng = leftMarker.getLatLng();
+    window.parent.postMessage({ source: 'left', lat: latlng.lat, lng: latlng.lng }, '*');
+  } else {
+    alert("Please select a location first!");
+  }
+});
+
+document.getElementById('submitRightBtn').addEventListener('click', function () {
+  if (rightMarker) {
+    const latlng = rightMarker.getLatLng();
+    window.parent.postMessage({ source: 'right', lat: latlng.lat, lng: latlng.lng }, '*');
+  } else {
+    alert("Please click inside selected village/district!");
+  }
+});
+
+document.getElementById('locateMeBtn').addEventListener('click', function () {
+  activePanel = 'left';
+  navigator.geolocation.getCurrentPosition(function (pos) {
+    const latlng = [pos.coords.latitude, pos.coords.longitude];
+    if (leftMarker) {
+      leftMarker.setLatLng(latlng);
+    } else {
+      leftMarker = L.marker(latlng, { draggable: true }).addTo(map);
+      leftMarker.on('dragend', function (e) {
+        const newLatLng = e.target.getLatLng();
+        updateLeftPanel(newLatLng);
+      });
+    }
+    updateLeftPanel({ lat: latlng[0], lng: latlng[1] });
+	// ✅ Add this line to zoom to location
+    map.setView(latlng, 14);
+  });
+});
+
+document.getElementById('labelToggle').addEventListener('change', function () {
+  labels.forEach(label => this.checked ? label.addTo(map) : map.removeLayer(label));
+});
+
+document.getElementById('resetLeftBtn').addEventListener('click', function () {
+  if (leftMarker) map.removeLayer(leftMarker);
+  leftMarker = null;
+  document.getElementById('stateBtn').innerText = 'Place:';
+  document.getElementById('districtBtn').innerText = '-';
+  document.getElementById('subdistrictBtn').innerText = '';
+  document.getElementById('villageBtn').innerText = '';
+  document.getElementById('latlngBtn').innerText = 'Lat: - , Lng: -';
+  map.setView([23.5, 80], 5);
+});
+
+document.getElementById('resetRightBtn').addEventListener('click', function () {
+  if (rightMarker) map.removeLayer(rightMarker);
+  rightMarker = null;
+  ['stateSelect', 'districtSelect', 'subdistrictSelect', 'villageSelect'].forEach(id => {
+    const el = document.getElementById(id);
+    el.selectedIndex = 0;
+    if (id !== 'stateSelect') el.innerHTML = `<option>Select ${id.replace('Select', '')}</option>`;
+  });
+  document.getElementById('rightLatLngBtn').innerText = 'Lat: - , Lng: -';
+  clearLayers(['district', 'subdistrict', 'village']);
+  map.setView([23.5, 80], 5);
+});
+</script>
+</html>
+
