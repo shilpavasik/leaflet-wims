@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Form with Coordinate Selector</title>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    label { font-weight: bold; display: block; margin-top: 10px; }
+    input { margin-right: 5px; padding: 5px; width: 60px; }
+    button {
+      padding: 8px 15px; border: none; font-weight: bold;
+      background: red; color: white; border-radius: 6px; margin-top: 10px;
+      cursor: pointer;
+    }
+    button:hover { background: darkred; }
+
+    fieldset {
+      border: 2px solid red;
+      padding: 15px;
+      width: 400px;
+      margin-bottom: 30px;
+    }
+
+    legend {
+      font-weight: bold;
+      font-size: 16px;
+    }
+
+    /* Modal Styles */
+    #wimsMapModal {
+      display: none;
+      position: fixed;
+      top: 5%;
+      left: 5%;
+      width: 90%;
+      height: 90%;
+      background: white;
+      border: 3px solid #333;
+      z-index: 9999;
+      box-shadow: 0 0 15px rgba(0, 0, 0, 0.3);
+    }
+
+    #wimsMapModal iframe {
+      width: 100%;
+      height: 94%;
+      border: none;
+    }
+
+    #modalHeader {
+      padding: 5px;
+      text-align: right;
+      background: #f0f0f0;
+      border-bottom: 1px solid #ccc;
+    }
+
+    #modalHeader button {
+      background: transparent;
+      color: red;
+      border: none;
+      font-size: 16px;
+      cursor: pointer;
+    }
+
+    #modalHeader button:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+<h2>Station Entry Form</h2>
+
+<fieldset>
+  <legend>Coordinates</legend>
+
+  <label for="lonDeg">Longitude*</label>
+  <input type="number" id="lonDeg" placeholder="Deg">
+  <input type="number" id="lonMin" placeholder="Min">
+  <input type="number" id="lonSec" placeholder="Sec">
+
+  <label for="latDeg">Latitude*</label>
+  <input type="number" id="latDeg" placeholder="Deg">
+  <input type="number" id="latMin" placeholder="Min">
+  <input type="number" id="latSec" placeholder="Sec">
+
+  <br><br>
+  <button type="button" onclick="openWIMSMap()">📍 Select Location from Map</button>
+</fieldset>
+
+<!-- WIMS Map Modal -->
+<div id="wimsMapModal">
+  <div id="modalHeader">
+    <button onclick="closeWIMSMap()">❌ Close</button>
+  </div>
+  <iframe id="wimsMapFrame" src=""></iframe>
+</div>
+
+<script>
+  function openWIMSMap() {
+    document.getElementById('wimsMapFrame').src = 'leaflet_wims.html'; // Update if name is different
+    document.getElementById('wimsMapModal').style.display = 'block';
+  }
+
+  function closeWIMSMap() {
+    document.getElementById('wimsMapModal').style.display = 'none';
+    document.getElementById('wimsMapFrame').src = '';
+  }
+
+  // Receive lat/lng from map and convert to DMS
+  window.addEventListener("message", function(event) {
+    if (event.data && event.data.lat && event.data.lng) {
+      function toDMS(dec) {
+        const deg = Math.floor(dec);
+        const minFloat = Math.abs((dec - deg) * 60);
+        const min = Math.floor(minFloat);
+        const sec = Math.round((minFloat - min) * 60);
+        return [deg, min, sec];
+      }
+
+      const [latD, latM, latS] = toDMS(event.data.lat);
+      const [lonD, lonM, lonS] = toDMS(event.data.lng);
+
+      document.getElementById('latDeg').value = latD;
+      document.getElementById('latMin').value = latM;
+      document.getElementById('latSec').value = latS;
+
+      document.getElementById('lonDeg').value = lonD;
+      document.getElementById('lonMin').value = lonM;
+      document.getElementById('lonSec').value = lonS;
+
+      if (event.data.source === 'left') {
+        alert('✅ Lat/Lng submitted from Left Panel');
+      } else if (event.data.source === 'right') {
+        alert('✅ Lat/Lng submitted from Right Panel');
+      }
+
+      closeWIMSMap();
+    }
+  });
+</script>
+
+</body>
+</html>
