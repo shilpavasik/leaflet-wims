@@ -94,23 +94,34 @@ new L.Control.Draw({
   edit: { featureGroup: drawnItems }
 }).addTo(map);
 
-map.on('draw:created', function (e) {
-  drawnItems.clearLayers();
-  drawnItems.addLayer(e.layer);
-  const type = e.layerType;
-  const latlng = (type === 'marker') ? e.layer.getLatLng() : e.layer.getBounds().getCenter();
-  if (activePanel === 'left') {
-  updateLeftPanel(latlng);
-  } else {
-    updateRightPanel(latlng);
-  }
-});
-
 let visuals = { district: null, subdistrict: null, village: null };
 let labels = [];
 let leftMarker = null;
 let rightMarker = null;
 let activePanel = null;
+
+map.on('draw:created', function (e) {
+  drawnItems.clearLayers();
+  drawnItems.addLayer(e.layer);
+  const type = e.layerType;
+  const latlng = (type === 'marker') ? e.layer.getLatLng() : e.layer.getBounds().getCenter();
+
+  if (activePanel === 'left') {
+    if (leftMarker) map.removeLayer(leftMarker);
+    leftMarker = L.marker(latlng, { draggable: true }).addTo(map);
+    leftMarker.on('dragend', function (e) {
+      updateLeftPanel(e.target.getLatLng());
+    });
+    updateLeftPanel(latlng);
+  } else {
+    if (rightMarker) map.removeLayer(rightMarker);
+    rightMarker = L.marker(latlng, { draggable: true }).addTo(map);
+    rightMarker.on('dragend', function (e) {
+      updateRightPanel(e.target.getLatLng());
+    });
+    updateRightPanel(latlng);
+  }
+});
 
 function toDMS(deg) {
   const d = Math.floor(deg);
@@ -159,7 +170,9 @@ const layersConfig = {
   subdistrict: { url: 'https://arc.indiawris.gov.in/server/rest/services/Common/Administrative_WRP/FeatureServer/5', color: 'purple', field: 'subdistrict' },
   village: { url: 'https://arc.indiawris.gov.in/server/rest/services/Common/Administrative_WRP/FeatureServer/6', color: 'orange', field: 'village' }
 };
+
 loadLayer(layersConfig.state, "1=1", "stateSelect", "state");
+
 function loadLayer(config, whereClause, selectId, visualKey) {
   L.esri.query({ url: config.url }).where(whereClause).limit(1000).run(function(err, fc) {
     if (err) return console.error(err);
@@ -185,13 +198,12 @@ function loadLayer(config, whereClause, selectId, visualKey) {
             if (rightMarker) {
               rightMarker.setLatLng(latlng);
             } else {
-              rightMarker = new L.Marker(latlng, { draggable: true }).addTo(map);
+              rightMarker = L.marker(latlng, { draggable: true }).addTo(map);
               rightMarker.on('dragend', function (e) {
-                const newLatLng = e.target.getLatLng();
-                document.getElementById('rightLatLngBtn').innerText = `Lat: ${newLatLng.lat.toFixed(5)} , Lng: ${newLatLng.lng.toFixed(5)}`;
+                updateRightPanel(e.target.getLatLng());
               });
             }
-            document.getElementById('rightLatLngBtn').innerText = `Lat: ${latlng.lat.toFixed(5)} , Lng: ${latlng.lng.toFixed(5)}`;
+            updateRightPanel(latlng);
           }
         });
         addLabelToMap(layer.getBounds(), feature.properties[config.field]);
@@ -218,7 +230,11 @@ function updateLeftPanel(latlng) {
   });
 }
 
-// REMAINING EVENT LISTENERS (unchanged structure)
+function updateRightPanel(latlng) {
+  document.getElementById('rightLatLngBtn').innerText = `Lat: ${latlng.lat.toFixed(5)} , Lng: ${latlng.lng.toFixed(5)}`;
+}
+
+// Panel logic
 document.getElementById('stateSelect').addEventListener('change', function() {
   activePanel = 'right';
   const data = JSON.parse(this.value);
@@ -246,24 +262,26 @@ document.getElementById('villageSelect').addEventListener('change', function() {
   map.setView(data.coords, 14);
 });
 
+// ✅ Submit Buttons
 document.getElementById('submitLeftBtn').addEventListener('click', function () {
   if (leftMarker) {
     const latlng = leftMarker.getLatLng();
-    window.parent.postMessage({ source: 'left', lat: latlng.lat, lng: latlng.lng }, '*');
+    alert(`✅ Left Panel Submitted:\nLatitude: ${latlng.lat}\nLongitude: ${latlng.lng}`);
   } else {
-    alert("Please select a location first!");
+    alert("⚠ Please select a location on the map or use Locate Me!");
   }
 });
 
 document.getElementById('submitRightBtn').addEventListener('click', function () {
   if (rightMarker) {
     const latlng = rightMarker.getLatLng();
-    window.parent.postMessage({ source: 'right', lat: latlng.lat, lng: latlng.lng }, '*');
+    alert(`✅ Right Panel Submitted:\nLatitude: ${latlng.lat}\nLongitude: ${latlng.lng}`);
   } else {
-    alert("Please click inside selected village/district!");
+    alert("⚠ Please click inside the selected village/district on the map.");
   }
 });
 
+// Locate Me
 document.getElementById('locateMeBtn').addEventListener('click', function () {
   activePanel = 'left';
   navigator.geolocation.getCurrentPosition(function (pos) {
@@ -273,20 +291,15 @@ document.getElementById('locateMeBtn').addEventListener('click', function () {
     } else {
       leftMarker = L.marker(latlng, { draggable: true }).addTo(map);
       leftMarker.on('dragend', function (e) {
-        const newLatLng = e.target.getLatLng();
-        updateLeftPanel(newLatLng);
+        updateLeftPanel(e.target.getLatLng());
       });
     }
     updateLeftPanel({ lat: latlng[0], lng: latlng[1] });
-	// ✅ Add this line to zoom to location
     map.setView(latlng, 14);
   });
 });
 
-document.getElementById('labelToggle').addEventListener('change', function () {
-  labels.forEach(label => this.checked ? label.addTo(map) : map.removeLayer(label));
-});
-
+// Reset buttons
 document.getElementById('resetLeftBtn').addEventListener('click', function () {
   if (leftMarker) map.removeLayer(leftMarker);
   leftMarker = null;
@@ -310,6 +323,10 @@ document.getElementById('resetRightBtn').addEventListener('click', function () {
   clearLayers(['district', 'subdistrict', 'village']);
   map.setView([23.5, 80], 5);
 });
-</script>
-</html>
 
+document.getElementById('labelToggle').addEventListener('change', function () {
+  labels.forEach(label => this.checked ? label.addTo(map) : map.removeLayer(label));
+});
+</script>
+</body>
+</html>
